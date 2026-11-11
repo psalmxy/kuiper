@@ -33,7 +33,13 @@ export class PoolCache {
       const key = new PublicKey(cfg.address);
       try {
         if (cfg.kind === "meteora-dlmm") {
-          this.amms.push(await MeteoraDlmmAmm.load(this.connection, key));
+          // One-time SDK load (several RPC calls); retry once and pace to stay under rate limits.
+          const amm = await MeteoraDlmmAmm.load(this.connection, key).catch(async () => {
+            await new Promise((r) => setTimeout(r, 1500));
+            return MeteoraDlmmAmm.load(this.connection, key);
+          });
+          this.amms.push(amm);
+          await new Promise((r) => setTimeout(r, 150));
           continue;
         }
         const acc = accounts.get(cfg.address);

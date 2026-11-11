@@ -1,26 +1,32 @@
 import { createRequire } from "node:module";
 import BN from "bn.js";
 import type DLMMClass from "@meteora-ag/dlmm";
-import { PublicKey, type Connection, type TransactionInstruction } from "@solana/web3.js";
+import { AccountLayout } from "@solana/spl-token";
+import { PublicKey, SYSVAR_CLOCK_PUBKEY, type Connection, type TransactionInstruction } from "@solana/web3.js";
 import type { AccountMap, Amm, Quote, QuoteParams, SwapParams } from "../types.js";
 
 // The SDK's ESM build imports `BN` as a named export from Anchor's CJS bundle, which Node's ESM
-// loader rejects. Loading the CJS build sidesteps it.
-const dlmmModule = createRequire(import.meta.url)("@meteora-ag/dlmm");
-// The CJS build exports the class as module.exports itself (with named exports attached).
-const DLMM: typeof DLMMClass = dlmmModule.default ?? dlmmModule;
+// loader rejects. Loading the CJS build sidesteps it. The CJS build exports the class as
+// module.exports itself (with named exports attached).
+const sdk = createRequire(import.meta.url)("@meteora-ag/dlmm");
+const DLMM: typeof DLMMClass = sdk.default ?? sdk;
+const { decodeAccount, deriveBinArray, deriveBinArrayBitmapExtension, findNextBinArrayIndexWithLiquidity, getBinArrayLowerUpperBinId, ClockLayout } = sdk;
 
 export const METEORA_DLMM_PROGRAM_ID = new PublicKey("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo");
 type DlmmInstance = Awaited<ReturnType<typeof DLMM.create>>;
 type BinArrays = Awaited<ReturnType<DlmmInstance["getBinArrayForSwap"]>>;
 
+/** Bin arrays loaded per direction (each holds 70 bins). */
+const BIN_ARRAYS_PER_SIDE = 4;
+
 /**
- * Meteora DLMM via the official SDK.
+ * Meteora DLMM.
  *
- * The SDK owns its own fetching, so this adapter uses `refresh()` (network) to
- * pre-load state + bin arrays, and keeps `quote()` pure against that cache.
- * TODO(phase 3): decode LbPair/BinArray from the batched AccountMap like the
- * other adapters so DLMM rides the same gRPC stream.
+ * The SDK is used once at startup (`DLMM.create`) for static data (mints, token programs,
+ * transfer hooks). After that the adapter rides the shared batched account fetch like the others:
+ * it lists the LbPair, reserves, bitmap extension, clock and the bin arrays around the active bin,
+ * decodes them with the SDK's own Anchor coder, and quotes with the SDK's pure `swapQuote`.
+ * No per-pool RPC calls during refresh — that's what lets 2s refresh fit a free RPC plan.
  */
 export class MeteoraDlmmAmm implements Amm {
   readonly label = "Meteora DLMM";
@@ -28,30 +34,70 @@ export class MeteoraDlmmAmm implements Amm {
   readonly amountInOffset = 8; // [disc][amount_in u64]...
   private binArrays: { xToY: BinArrays; yToX: BinArrays } = { xToY: [], yToX: [] };
   private loaded = false;
+  private readonly bitmapExt: PublicKey;
 
-  private constructor(readonly key: PublicKey, private readonly dlmm: DlmmInstance) {}
+  private constructor(readonly key: PublicKey, private readonly dlmm: DlmmInstance) {
+    this.bitmapExt = deriveBinArrayBitmapExtension(key, METEORA_DLMM_PROGRAM_ID)[0];
+  }
 
   static async load(connection: Connection, key: PublicKey) {
-    const amm = new MeteoraDlmmAmm(key, await DLMM.create(connection, key));
-    await amm.refresh();
-    return amm;
+    return new MeteoraDlmmAmm(key, await DLMM.create(connection, key));
   }
 
   reserveMints() {
     return [this.dlmm.tokenX.publicKey, this.dlmm.tokenY.publicKey];
   }
 
-  accountsToUpdate() {
-    return []; // handled by refresh()
+  /** Mirrors the SDK's getBinArrayForSwap walk, without fetching. */
+  private binArrayKeys(swapForY: boolean): PublicKey[] {
+    const keys: PublicKey[] = [];
+    let active = this.dlmm.lbPair.activeId;
+    while (keys.length < BIN_ARRAYS_PER_SIDE) {
+      const idx = findNextBinArrayIndexWithLiquidity(swapForY, new BN(active), this.dlmm.lbPair, this.dlmm.binArrayBitmapExtension?.account ?? null);
+      if (idx === null) break;
+      keys.push(deriveBinArray(this.key, idx, METEORA_DLMM_PROGRAM_ID)[0]);
+      const [lower, upper] = getBinArrayLowerUpperBinId(idx);
+      active = swapForY ? lower.toNumber() - 1 : upper.toNumber() + 1;
+    }
+    return keys;
   }
 
-  update(_accounts: AccountMap) {}
+  /** Dynamic: the bin-array window follows the active bin. */
+  accountsToUpdate() {
+    return [
+      this.key,
+      this.bitmapExt,
+      this.dlmm.lbPair.reserveX,
+      this.dlmm.lbPair.reserveY,
+      SYSVAR_CLOCK_PUBKEY,
+      ...this.binArrayKeys(true),
+      ...this.binArrayKeys(false),
+    ];
+  }
 
-  async refresh() {
-    await this.dlmm.refetchStates();
-    const [xToY, yToX] = await Promise.all([this.dlmm.getBinArrayForSwap(true), this.dlmm.getBinArrayForSwap(false)]);
-    this.binArrays = { xToY, yToX };
-    this.loaded = true;
+  update(accounts: AccountMap) {
+    const get = (k: PublicKey) => accounts.get(k.toBase58());
+    const pool = get(this.key);
+    if (!pool) return;
+    const d = this.dlmm as any;
+    d.lbPair = decodeAccount(d.program, "lbPair", pool.data);
+    const ext = get(this.bitmapExt);
+    d.binArrayBitmapExtension = ext ? { publicKey: this.bitmapExt, account: decodeAccount(d.program, "binArrayBitmapExtension", ext.data) } : null;
+    const rx = get(d.lbPair.reserveX);
+    const ry = get(d.lbPair.reserveY);
+    if (rx) d.tokenX.amount = AccountLayout.decode(rx.data).amount;
+    if (ry) d.tokenY.amount = AccountLayout.decode(ry.data).amount;
+    const clock = get(SYSVAR_CLOCK_PUBKEY);
+    if (clock) d.clock = ClockLayout.decode(clock.data);
+
+    const load = (keys: PublicKey[]): BinArrays =>
+      keys.flatMap((k) => {
+        const acc = get(k);
+        return acc ? [{ publicKey: k, account: decodeAccount(d.program, "binArray", acc.data) }] : [];
+      });
+    // Keys come from the freshly decoded active bin; arrays missing from this batch arrive next refresh.
+    this.binArrays = { xToY: load(this.binArrayKeys(true)), yToX: load(this.binArrayKeys(false)) };
+    this.loaded = this.binArrays.xToY.length + this.binArrays.yToX.length > 0;
   }
 
   isActive() {

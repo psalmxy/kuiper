@@ -99,7 +99,9 @@ Run against Solana mainnet from the public RPC, with nothing signed or sent; eve
 
 **Agent tickets simulated on mainnet:** stake (1 SOL → 0.7635 JitoSOL), lend (100 USDC → 93.52 jlUSDC at ~4.5% APY), borrow (50 USDC against 2 SOL), recurring (300 USDC → JUP over 3 days), and token checks all pass.
 
-**Kuiper vs Jupiter:** on the pools Kuiper indexes, Kuiper ties Jupiter on LSTs (JitoSOL ±0.000%). Jupiter wins SOL/USDC by ~0.1% through prop AMMs (GoonFi, HumidiFi, SolFi…) and some long-tail pairs (JTO −0.4%) through venues Kuiper doesn't integrate yet (Raydium CLMM, 1DEX, ZeroFi). The hybrid design handles this today by always giving the user the better of the two; closing the gap means more adapters (see roadmap).
+**On a Helius RPC (free plan):** all 35 pools refresh every 2s from one batched fetch per cycle, zero rate-limit errors. Meteora DLMM was moved off per-pool SDK fetching onto the batched path and re-verified exact on 4 pools (SOL/USDC both ways, BONK/USDC, JitoSOL/SOL).
+
+**Kuiper vs Jupiter:** on the pools Kuiper indexes, Kuiper ties Jupiter on LSTs (JitoSOL ±0.000%) and is within ~0.05% on SOL/USDC, SOL/JUP and USDT/USDC; JUP/USDC (−1.8%) and JTO (−0.7%) are where missing venues hurt most. Jupiter wins SOL/USDC by ~0.1% through prop AMMs (GoonFi, HumidiFi, SolFi…) and some long-tail pairs (JTO −0.4%) through venues Kuiper doesn't integrate yet (Raydium CLMM, 1DEX, ZeroFi). The hybrid design handles this today by always giving the user the better of the two; closing the gap means more adapters (see roadmap).
 
 **Pool index:** `pnpm discover:pools` indexes 14 pairs across the three DEXes from chain and keeps 35 pools with real depth (`apps/api/src/pools.json`). Raydium's CPMM pools are mostly thin for majors; Raydium's depth sits in CLMM/AMM v4.
 
@@ -127,7 +129,7 @@ Then set `KUIPER_ROUTER_PROGRAM_ID` in `.env` and update `KUIPER_ROUTER_PROGRAM_
 - [x] **Phase 1 — Hybrid aggregator.** Adapters (CPMM, Whirlpool, DLMM), split router, Jupiter fallback, fee, UI.
 - [x] **Phase 2 — Kuiper router program (Anchor).** Built and tested in LiteSVM. **Not deployed yet** — see "Deploying the router" below.
 - [x] **Agent.** Swap / stake / lend / borrow / recurring tickets with token checks and simulation.
-- [ ] **Phase 3 — Streaming state.** Yellowstone gRPC account subscriptions into `PoolCache`; DLMM adapter moved onto the batched `AccountMap` path.
+- [ ] **Phase 3 — Streaming state.** Yellowstone gRPC account subscriptions into `PoolCache` (all adapters already use the batched `AccountMap` path, so this is a cache-only change).
 - [ ] **Phase 4 — Graph router.** Token graph over all pools, top-k paths (modified Bellman-Ford / k-shortest-paths on −log(rate)), then split optimisation across paths.
 - [ ] **Phase 5 — More venues.** Highest impact first, from the live comparison: **Raydium CLMM**, then AMM v4, pump.swap, Meteora DAMM v2, Phoenix/Manifest order books; Token-2022 transfer fees. Prop AMMs (HumidiFi, GoonFi, SolFi, Tessera) win most SOL/USDC flow but generally only expose integration to aggregators by agreement.
 - [ ] **Phase 6 — Execution.** Jito bundles / Jupiter `/tx/v1/submit` landing, address lookup tables for Kuiper routes, gasless via integrator payer.
