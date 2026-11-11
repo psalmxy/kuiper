@@ -8,6 +8,11 @@ const schema = z.object({
   POOL_REFRESH_MS: z.coerce.number().int().min(250).default(2000),
   PORT: z.coerce.number().int().default(8787),
   CORS_ORIGIN: z.string().default("*"),
+  /** Set once the Kuiper router program is deployed; enables multi-hop Kuiper routes. */
+  KUIPER_ROUTER_PROGRAM_ID: z.string().optional().default(""),
+  /** For the DeFi agent (/agent/chat). */
+  ANTHROPIC_API_KEY: z.string().optional().default(""),
+  AGENT_MODEL: z.string().default("claude-sonnet-5-5"),
 });
 
 export const env = schema.parse(process.env);

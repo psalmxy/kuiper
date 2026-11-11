@@ -16,28 +16,48 @@ const jupiter = new JupiterClient(env.JUP_API_KEY);
 const service = new SwapService(connection, cache, router, jupiter, {
   feeWallet: env.FEE_WALLET ? new PublicKey(env.FEE_WALLET) : undefined,
   feeBps: env.PLATFORM_FEE_BPS,
+  routerProgramId: env.KUIPER_ROUTER_PROGRAM_ID ? new PublicKey(env.KUIPER_ROUTER_PROGRAM_ID) : undefined,
 });
 
 // ---------- serialisers (bigint → string) ----------
-const routeJson = (r: Route | null) =>
+export const routeJson = (r: Route | null) =>
   r && {
     inAmount: r.inAmount.toString(),
     outAmount: r.outAmount.toString(),
-    legs: r.legs.map((l) => ({
-      label: l.amm.label,
-      pool: l.amm.key.toBase58(),
-      inAmount: l.inAmount.toString(),
-      outAmount: l.outAmount.toString(),
-      feeAmount: l.feeAmount.toString(),
-      percent: Number((l.inAmount * 10_000n) / r.inAmount) / 100,
-    })),
+    path: [r.inputMint, ...r.hops.map((h) => h.outputMint)].map((m) => m.toBase58()),
+    legs: r.hops.flatMap((h, i) =>
+      h.legs.map((l) => ({
+        hop: i,
+        label: l.amm.label,
+        pool: l.amm.key.toBase58(),
+        inputMint: h.inputMint.toBase58(),
+        outputMint: h.outputMint.toBase58(),
+        inAmount: l.inAmount.toString(),
+        outAmount: l.outAmount.toString(),
+        feeAmount: l.feeAmount.toString(),
+        percent: Number((l.inAmount * 10_000n) / h.inAmount) / 100,
+      })),
+    ),
   };
-const jupJson = (j: JupBuildResponse | null) =>
-  j && {
+export const jupJson = (j: JupBuildResponse | null) => {
+  if (!j) return null;
+  const path = [j.inputMint];
+  for (const p of j.routePlan) if (path[path.length - 1] !== p.swapInfo.outputMint && p.swapInfo.outputMint !== j.outputMint) path.push(p.swapInfo.outputMint);
+  path.push(j.outputMint);
+  return {
     inAmount: j.inAmount,
     outAmount: j.outAmount,
-    legs: j.routePlan.map((p) => ({ label: p.swapInfo.label, pool: p.swapInfo.ammKey, inputMint: p.swapInfo.inputMint, outputMint: p.swapInfo.outputMint, percent: p.percent })),
+    path,
+    legs: j.routePlan.map((p) => ({
+      hop: Math.max(0, path.indexOf(p.swapInfo.inputMint)),
+      label: p.swapInfo.label,
+      pool: p.swapInfo.ammKey,
+      inputMint: p.swapInfo.inputMint,
+      outputMint: p.swapInfo.outputMint,
+      percent: p.percent,
+    })),
   };
+};
 
 // ---------- validation ----------
 const pubkey = z.string().refine((s) => {

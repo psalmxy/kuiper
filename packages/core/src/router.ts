@@ -8,7 +8,8 @@ export interface RouteLeg {
   feeAmount: bigint;
 }
 
-export interface Route {
+/** One token-to-token stage of a route, possibly split across several pools. */
+export interface RouteHop {
   inputMint: PublicKey;
   outputMint: PublicKey;
   inAmount: bigint;
@@ -16,28 +17,40 @@ export interface Route {
   legs: RouteLeg[];
 }
 
+export interface Route {
+  inputMint: PublicKey;
+  outputMint: PublicKey;
+  inAmount: bigint;
+  outAmount: bigint;
+  hops: RouteHop[];
+}
+
 export interface RouterOptions {
-  /** Max pools one order is split across. Each extra leg costs ~compute + account space. */
+  /** Max pools one hop is split across. Each extra leg costs compute + account space. */
   maxLegs?: number;
   /** Granularity of the greedy allocation pass. */
   chunks?: number;
   /** Only split if it beats the best single pool by at least this many bps. */
   minSplitImprovementBps?: number;
+  /** Only take a 2-hop route if it beats the best direct route by at least this many bps. */
+  minHopImprovementBps?: number;
 }
 
-const DEFAULTS: Required<RouterOptions> = { maxLegs: 3, chunks: 20, minSplitImprovementBps: 2 };
+export interface RouteRequestOptions {
+  /** Tokens allowed in the middle of a 2-hop route (e.g. SOL, USDC, USDT). Empty = direct only. */
+  intermediates?: PublicKey[];
+}
+
+const DEFAULTS: Required<RouterOptions> = { maxLegs: 3, chunks: 20, minSplitImprovementBps: 2, minHopImprovementBps: 5 };
 
 /**
- * Direct-pair router with order splitting.
+ * Kuiper's off-chain router.
  *
- * Metis/Iris do multi-hop + multi-split over a full liquidity graph and use an
- * on-chain router program to chain hops atomically. Kuiper v1 deliberately
- * covers the case it can execute safely *without* its own program:
- *   - best single pool for A→B
- *   - split A→B across up to `maxLegs` pools (greedy marginal allocation,
- *     then golden-section refinement between the two largest legs — the same
- *     optimiser family Jupiter cites for Iris)
- * Multi-hop routes fall through to Jupiter until the Kuiper router program ships.
+ * - Direct A→B: best single pool, or a split across up to `maxLegs` pools (greedy marginal
+ *   allocation, then golden-section refinement between the two largest legs — the optimiser
+ *   family Jupiter cites for Iris).
+ * - 2-hop A→X→B through a small set of hub tokens, each hop itself optionally split.
+ *   Multi-hop routes need the Kuiper router program on-chain to pass hop 1's real output into hop 2.
  */
 export class Router {
   private readonly opts: Required<RouterOptions>;
@@ -54,38 +67,50 @@ export class Router {
     });
   }
 
+  bestRoute(inputMint: PublicKey, outputMint: PublicKey, amount: bigint, req: RouteRequestOptions = {}): Route | null {
+    if (amount <= 0n || inputMint.equals(outputMint)) return null;
+    const direct = this.bestHop(inputMint, outputMint, amount);
+    let best: Route | null = direct && { inputMint, outputMint, inAmount: amount, outAmount: direct.outAmount, hops: [direct] };
+
+    for (const mid of req.intermediates ?? []) {
+      if (mid.equals(inputMint) || mid.equals(outputMint)) continue;
+      const h1 = this.bestHop(inputMint, mid, amount);
+      if (!h1) continue;
+      const h2 = this.bestHop(mid, outputMint, h1.outAmount);
+      if (!h2) continue;
+      const bar = best ? best.outAmount + (best.outAmount * BigInt(this.opts.minHopImprovementBps)) / 10_000n : 0n;
+      if (h2.outAmount > bar) best = { inputMint, outputMint, inAmount: amount, outAmount: h2.outAmount, hops: [h1, h2] };
+    }
+    return best;
+  }
+
   private out(amm: Amm, inputMint: PublicKey, outputMint: PublicKey, amount: bigint): bigint {
     if (amount <= 0n) return 0n;
     const q = amm.quote({ inputMint, outputMint, amount });
     return q.notEnoughLiquidity ? 0n : q.outAmount;
   }
 
-  bestRoute(inputMint: PublicKey, outputMint: PublicKey, amount: bigint): Route | null {
+  /** Best execution for a single token pair: one pool or a split. */
+  bestHop(inputMint: PublicKey, outputMint: PublicKey, amount: bigint): RouteHop | null {
     if (amount <= 0n) return null;
     const pools = this.candidates(inputMint, outputMint);
     if (pools.length === 0) return null;
 
-    // 1. Best single pool.
     const singles = pools
       .map((amm) => ({ amm, out: this.out(amm, inputMint, outputMint, amount) }))
       .filter((s) => s.out > 0n)
       .sort((a, b) => (b.out > a.out ? 1 : b.out < a.out ? -1 : 0));
     if (singles.length === 0) return null;
-    const best = singles[0]!;
-    let bestAlloc = new Map<Amm, bigint>([[best.amm, amount]]);
-    let bestOut = best.out;
+    const first = singles[0]!;
+    let bestAlloc = new Map<Amm, bigint>([[first.amm, amount]]);
+    const bestOut = first.out;
 
-    // 2. Split across the top-N pools.
     const top = singles.slice(0, this.opts.maxLegs).map((s) => s.amm);
     if (top.length >= 2) {
       const alloc = this.greedySplit(top, inputMint, outputMint, amount);
       this.refineTopTwo(alloc, inputMint, outputMint);
       const splitOut = [...alloc].reduce((s, [amm, a]) => s + this.out(amm, inputMint, outputMint, a), 0n);
-      const threshold = bestOut + (bestOut * BigInt(this.opts.minSplitImprovementBps)) / 10_000n;
-      if (splitOut > threshold) {
-        bestAlloc = alloc;
-        bestOut = splitOut;
-      }
+      if (splitOut > bestOut + (bestOut * BigInt(this.opts.minSplitImprovementBps)) / 10_000n) bestAlloc = alloc;
     }
 
     const legs: RouteLeg[] = [...bestAlloc]

@@ -6,7 +6,7 @@ import { PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { buildSwap, getQuote, sendSigned, type QuoteResponse } from "@/lib/api";
 import { fromBaseUnits, shortAddr, toBaseUnits } from "@/lib/format";
-import { SOL_MINT, TOKENS, type Token } from "@/lib/tokens";
+import { SOL_MINT, TOKENS, symbolOf, type Token } from "@/lib/tokens";
 import { TokenSelect } from "./TokenSelect";
 
 const SLIPPAGES = [10, 50, 100];
@@ -252,11 +252,22 @@ function RoutePanel({ quote, inToken, outToken, minReceived }: { quote: QuoteRes
         </span>
         {edgeBps !== null && edgeBps > 0 && <span className="ml-2 text-xs text-ok">+{(edgeBps / 100).toFixed(2)}% vs {quote.best === "kuiper" ? "Jupiter" : "Kuiper"}</span>}
       </Row>
-      <div className="flex flex-wrap gap-1.5 pt-0.5">
-        {best.legs.map((l, i) => (
-          <span key={i} className="num rounded-md border border-line px-2 py-0.5 text-xs text-dim">
-            {l.label} {Math.round(l.percent)}%
-          </span>
+      <div className="space-y-1.5 pt-0.5">
+        {best.path.slice(0, -1).map((mint, hop) => (
+          <div key={hop} className="flex flex-wrap items-center gap-1.5">
+            {best.path.length > 2 && (
+              <span className="num w-24 shrink-0 text-xs text-dim">
+                {symbolOf(mint)} → {symbolOf(best.path[hop + 1]!)}
+              </span>
+            )}
+            {best.legs
+              .filter((l) => l.hop === hop)
+              .map((l, i) => (
+                <span key={i} className="num rounded-md border border-line px-2 py-0.5 text-xs text-dim">
+                  {l.label} {Math.round(l.percent)}%
+                </span>
+              ))}
+          </div>
         ))}
       </div>
       <Row label="Minimum received">

@@ -8,15 +8,17 @@ import {
 } from "@solana/spl-token";
 import { ComputeBudgetProgram, PublicKey, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
 import { applySlippage } from "./math/u64.js";
+import { buildRouterInstruction, type RouterLegIx } from "./router-program.js";
 import type { Route } from "./router.js";
 
-/** Rough per-leg compute budgets; tune from simulation logs. */
+/** Rough per-leg compute budgets; the API right-sizes from simulation anyway. */
 const CU_PER_LEG: Record<string, number> = {
   "Raydium CPMM": 90_000,
   "Orca Whirlpool": 160_000,
   "Meteora DLMM": 200_000,
 };
 const CU_BASE = 60_000;
+const CU_ROUTER = 40_000;
 
 export interface PlatformFee {
   /** Fee in input-token base units (already deducted from route.inAmount by the caller). */
@@ -31,55 +33,100 @@ export interface BuildSwapArgs {
   route: Route;
   user: PublicKey;
   slippageBps: number;
-  inputTokenProgram: PublicKey;
-  outputTokenProgram: PublicKey;
+  /** Token program (SPL Token or Token-2022) for every mint the route touches, keyed by base58 mint. */
+  tokenPrograms: Map<string, PublicKey>;
   priorityMicroLamports?: number;
   platformFee?: PlatformFee;
+  /** Required for multi-hop routes. */
+  routerProgramId?: PublicKey;
 }
 
 /**
- * Builds the full instruction list for a Kuiper-routed swap:
- * compute budget → ATAs / wSOL wrap → platform fee → one swap ix per leg → unwrap.
- * Every leg carries its own min-out, so a split route is still all-or-nothing in one tx.
+ * Instruction list for a Kuiper-routed swap:
+ *   compute budget → platform fee → ATAs / wSOL wrap → swap(s) → unwrap.
+ * Single-hop routes call the DEXes directly (each leg with its own min-out, atomic in one tx).
+ * Multi-hop routes go through the Kuiper router program, which feeds real intermediate amounts
+ * between hops and enforces one final min-out.
  */
 export async function buildKuiperSwapInstructions(a: BuildSwapArgs): Promise<TransactionInstruction[]> {
   const { route, user } = a;
-  const inIsSol = route.inputMint.equals(NATIVE_MINT);
-  const outIsSol = route.outputMint.equals(NATIVE_MINT);
-  const srcAta = getAssociatedTokenAddressSync(route.inputMint, user, true, a.inputTokenProgram);
-  const dstAta = getAssociatedTokenAddressSync(route.outputMint, user, true, a.outputTokenProgram);
+  const prog = (m: PublicKey) => {
+    const p = a.tokenPrograms.get(m.toBase58());
+    if (!p) throw new Error(`token program unknown for ${m.toBase58()}`);
+    return p;
+  };
+  const ata = (m: PublicKey) => getAssociatedTokenAddressSync(m, user, true, prog(m));
+  const mints = [route.inputMint, ...route.hops.map((h) => h.outputMint)];
+  const slots = mints.map(ata);
+  const legs = route.hops.flatMap((h) => h.legs);
 
-  const cu = CU_BASE + route.legs.reduce((s, l) => s + (CU_PER_LEG[l.amm.label] ?? 200_000), 0);
+  const cu = CU_BASE + (route.hops.length > 1 ? CU_ROUTER : 0) + legs.reduce((s, l) => s + (CU_PER_LEG[l.amm.label] ?? 200_000), 0);
   const ixs: TransactionInstruction[] = [ComputeBudgetProgram.setComputeUnitLimit({ units: cu })];
   if (a.priorityMicroLamports) ixs.push(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: a.priorityMicroLamports }));
 
-  // Platform fee, taken from the input before the swap.
-  ixs.push(...platformFeeInstructions({ user, inputMint: route.inputMint, inputTokenProgram: a.inputTokenProgram, fee: a.platformFee }));
+  ixs.push(...platformFeeInstructions({ user, inputMint: route.inputMint, inputTokenProgram: prog(route.inputMint), fee: a.platformFee }));
 
+  const inIsSol = route.inputMint.equals(NATIVE_MINT);
   if (inIsSol) {
     ixs.push(
-      createAssociatedTokenAccountIdempotentInstruction(user, srcAta, user, NATIVE_MINT),
-      SystemProgram.transfer({ fromPubkey: user, toPubkey: srcAta, lamports: route.inAmount }),
-      createSyncNativeInstruction(srcAta),
+      createAssociatedTokenAccountIdempotentInstruction(user, slots[0]!, user, NATIVE_MINT),
+      SystemProgram.transfer({ fromPubkey: user, toPubkey: slots[0]!, lamports: route.inAmount }),
+      createSyncNativeInstruction(slots[0]!),
     );
   }
-  ixs.push(createAssociatedTokenAccountIdempotentInstruction(user, dstAta, user, route.outputMint, a.outputTokenProgram));
-
-  for (const leg of route.legs) {
-    const legIxs = await leg.amm.swapInstructions({
-      user,
-      inputMint: route.inputMint,
-      outputMint: route.outputMint,
-      userSourceTokenAccount: srcAta,
-      userDestinationTokenAccount: dstAta,
-      inAmount: leg.inAmount,
-      minOutAmount: applySlippage(leg.outAmount, a.slippageBps),
-    });
-    ixs.push(...legIxs);
+  for (let i = 1; i < mints.length; i++) {
+    ixs.push(createAssociatedTokenAccountIdempotentInstruction(user, slots[i]!, user, mints[i]!, prog(mints[i]!)));
   }
 
-  if (inIsSol) ixs.push(createCloseAccountInstruction(srcAta, user, user));
-  if (outIsSol) ixs.push(createCloseAccountInstruction(dstAta, user, user));
+  if (route.hops.length === 1) {
+    for (const leg of legs) {
+      ixs.push(
+        ...(await leg.amm.swapInstructions({
+          user,
+          inputMint: route.inputMint,
+          outputMint: route.outputMint,
+          userSourceTokenAccount: slots[0]!,
+          userDestinationTokenAccount: slots[1]!,
+          inAmount: leg.inAmount,
+          minOutAmount: applySlippage(leg.outAmount, a.slippageBps),
+        })),
+      );
+    }
+  } else {
+    if (!a.routerProgramId) throw new Error("multi-hop route needs the Kuiper router program (set KUIPER_ROUTER_PROGRAM_ID)");
+    const routerLegs: RouterLegIx[] = [];
+    for (const [h, hop] of route.hops.entries()) {
+      for (const leg of hop.legs) {
+        const legIxs = await leg.amm.swapInstructions({
+          user,
+          inputMint: hop.inputMint,
+          outputMint: hop.outputMint,
+          userSourceTokenAccount: slots[h]!,
+          userDestinationTokenAccount: slots[h + 1]!,
+          inAmount: leg.inAmount,
+          minOutAmount: 0n, // the router enforces one final min-out
+        });
+        if (legIxs.length !== 1) throw new Error(`${leg.amm.label} produced ${legIxs.length} instructions; router needs exactly 1`);
+        const pct = Number((leg.inAmount * 100n) / hop.inAmount);
+        routerLegs.push({ inputSlot: h, outputSlot: h + 1, percent: Math.min(100, Math.max(1, pct)), amountOffset: leg.amm.amountInOffset, ix: legIxs[0]! });
+      }
+    }
+    ixs.push(
+      buildRouterInstruction({
+        programId: a.routerProgramId,
+        user,
+        slots,
+        inAmount: route.inAmount,
+        minOut: applySlippage(route.outAmount, a.slippageBps),
+        legs: routerLegs,
+      }),
+    );
+  }
+
+  // Unwrap any wSOL the route touched (input leftovers, SOL in the middle, SOL out).
+  mints.forEach((m, i) => {
+    if (m.equals(NATIVE_MINT)) ixs.push(createCloseAccountInstruction(slots[i]!, user, user));
+  });
   return ixs;
 }
 

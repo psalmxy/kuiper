@@ -18,3 +18,7 @@ export const TOKENS: Token[] = [
 ];
 
 export const SOL_MINT = TOKENS[0]!.mint;
+
+const BY_MINT = new Map(TOKENS.map((t) => [t.mint, t]));
+export const symbolOf = (mint: string) => BY_MINT.get(mint)?.symbol ?? `${mint.slice(0, 4)}…`;
+export const tokenOf = (mint: string) => BY_MINT.get(mint);

@@ -1,0 +1,20 @@
+[package]
+name = "kuiper-router-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+rust-version = "1.97.0"
+
+[dependencies]
+
+[dev-dependencies]
+kuiper-router = { path = "../kuiper-router", features = ["no-entrypoint", "test-dex"] }
+anchor-lang = "=1.2.2"
+litesvm = "0.16.0"
+solana-account = "4"
+solana-instruction = "3.4"
+solana-keypair = "3"
+solana-message = "4"
+solana-pubkey = "4"
+solana-signer = "3"
+solana-transaction = "4"

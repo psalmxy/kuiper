@@ -10,6 +10,7 @@ const B = Keypair.generate().publicKey;
 class FakeCpAmm implements Amm {
   readonly key = Keypair.generate().publicKey;
   readonly programId = PublicKey.default;
+  readonly amountInOffset = 8;
   constructor(readonly label: string, private ra: bigint, private rb: bigint, private feeBps = 25n, private active = true) {}
   reserveMints() { return [A, B]; }
   accountsToUpdate() { return []; }
@@ -29,8 +30,8 @@ describe("Router", () => {
     const deep = new FakeCpAmm("deep", 10n ** 12n, 10n ** 12n);
     const shallow = new FakeCpAmm("shallow", 10n ** 9n, 10n ** 9n);
     const r = new Router(() => [deep, shallow]).bestRoute(A, B, 1_000n)!;
-    expect(r.legs).toHaveLength(1);
-    expect(r.legs[0]!.amm).toBe(deep);
+    expect(r.hops[0]!.legs).toHaveLength(1);
+    expect(r.hops[0]!.legs[0]!.amm).toBe(deep);
   });
 
   it("splits large trades across comparable pools and beats every single pool", () => {
@@ -39,8 +40,8 @@ describe("Router", () => {
     const amount = 2n * 10n ** 8n;
     const r = new Router(() => [p1, p2]).bestRoute(A, B, amount)!;
     const best1 = [p1, p2].map((p) => p.quote({ inputMint: A, outputMint: B, amount }).outAmount).reduce((a, b) => (a > b ? a : b));
-    expect(r.legs).toHaveLength(2);
-    expect(r.legs.reduce((s, l) => s + l.inAmount, 0n)).toBe(amount);
+    expect(r.hops[0]!.legs).toHaveLength(2);
+    expect(r.hops[0]!.legs.reduce((s, l) => s + l.inAmount, 0n)).toBe(amount);
     expect(r.outAmount).toBeGreaterThan(best1);
   });
 
@@ -48,7 +49,7 @@ describe("Router", () => {
     const p1 = new FakeCpAmm("p1", 10n ** 9n, 10n ** 9n);
     const p2 = new FakeCpAmm("p2", 10n ** 9n, 10n ** 9n);
     const r = new Router(() => [p1, p2]).bestRoute(A, B, 4n * 10n ** 8n)!;
-    const [l1, l2] = r.legs;
+    const [l1, l2] = r.hops[0]!.legs;
     const diff = l1!.inAmount > l2!.inAmount ? l1!.inAmount - l2!.inAmount : l2!.inAmount - l1!.inAmount;
     expect(diff * 1000n).toBeLessThan(4n * 10n ** 8n); // within 0.1% of a 50/50 split
   });
@@ -58,7 +59,7 @@ describe("Router", () => {
     const p1 = new FakeCpAmm("p1", big * 5n, big * 5n);
     const p2 = new FakeCpAmm("p2", big * 4n, big * 4n);
     const r = new Router(() => [p1, p2]).bestRoute(A, B, big)!;
-    expect(r.legs.reduce((s, l) => s + l.inAmount, 0n)).toBe(big);
+    expect(r.hops[0]!.legs.reduce((s, l) => s + l.inAmount, 0n)).toBe(big);
     expect(r.outAmount).toBeGreaterThan(0n);
   });
 
@@ -66,6 +67,6 @@ describe("Router", () => {
     const off = new FakeCpAmm("off", 10n ** 12n, 10n ** 12n, 25n, false);
     expect(new Router(() => [off]).bestRoute(A, B, 1_000n)).toBeNull();
     const ok = new FakeCpAmm("ok", 10n ** 9n, 10n ** 9n);
-    expect(new Router(() => [off, ok]).bestRoute(A, B, 1_000n)!.legs[0]!.amm).toBe(ok);
+    expect(new Router(() => [off, ok]).bestRoute(A, B, 1_000n)!.hops[0]!.legs[0]!.amm).toBe(ok);
   });
 });

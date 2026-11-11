@@ -44,6 +44,7 @@ export function makeWhirlpoolProgram(connection: Connection) {
 export class OrcaWhirlpoolAmm implements Amm {
   readonly label = "Orca Whirlpool";
   readonly programId = ORCA_WHIRLPOOL_PROGRAM_ID;
+  readonly amountInOffset = 8; // [disc][amount_in u64]...
   private pool: WhirlpoolData;
   private tickArrays: { aToB: TickArray[]; bToA: TickArray[] } = { aToB: [], bToA: [] };
   private oracle: OracleData | null = null;

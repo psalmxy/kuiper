@@ -126,6 +126,7 @@ export function cpmmSwapBaseInput(args: {
 export class RaydiumCpmmAmm implements Amm {
   readonly label = "Raydium CPMM";
   readonly programId = RAYDIUM_CPMM_PROGRAM_ID;
+  readonly amountInOffset = 8; // [disc][amount_in u64]...
   private pool: CpmmPoolState;
   private config?: CpmmAmmConfig;
   private vault0?: bigint;

@@ -1,6 +1,7 @@
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
 
 export interface Leg {
+  hop: number;
   label: string;
   pool: string;
   percent: number;
@@ -11,6 +12,8 @@ export interface Leg {
 export interface RouteSummary {
   inAmount: string;
   outAmount: string;
+  /** Mints along the route, e.g. [SOL, USDC, BONK] for a 2-hop route. */
+  path: string[];
   legs: Leg[];
 }
 

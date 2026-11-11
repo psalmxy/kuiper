@@ -1,0 +1,29 @@
+[package]
+name = "kuiper-router"
+version = "0.1.0"
+description = "Kuiper on-chain swap router: chains and splits DEX swaps atomically"
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "kuiper_router"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+# Whitelists the mock AMM so LiteSVM tests can route through it. Never deploy with this.
+test-dex = []
+custom-heap = []
+custom-panic = []
+anchor-debug = []
+
+[dependencies]
+anchor-lang = "=1.2.2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

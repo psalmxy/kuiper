@@ -23,6 +23,7 @@ type BinArrays = Awaited<ReturnType<DlmmInstance["getBinArrayForSwap"]>>;
 export class MeteoraDlmmAmm implements Amm {
   readonly label = "Meteora DLMM";
   readonly programId = METEORA_DLMM_PROGRAM_ID;
+  readonly amountInOffset = 8; // [disc][amount_in u64]...
   private binArrays: { xToY: BinArrays; yToX: BinArrays } = { xToY: [], yToX: [] };
   private loaded = false;
 

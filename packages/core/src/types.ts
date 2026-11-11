@@ -52,6 +52,11 @@ export interface Amm {
   readonly key: PublicKey;
   readonly label: string;
   readonly programId: PublicKey;
+  /**
+   * Byte offset of the u64 input amount inside this DEX's swap instruction data.
+   * The Kuiper router program overwrites it on-chain with the amount a previous hop actually produced.
+   */
+  readonly amountInOffset: number;
 
   reserveMints(): PublicKey[];
   accountsToUpdate(): PublicKey[];

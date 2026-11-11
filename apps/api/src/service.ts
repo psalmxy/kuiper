@@ -18,6 +18,13 @@ import {
 } from "@solana/web3.js";
 import { JupiterClient, type JupBuildResponse } from "./jupiter.js";
 
+/** Hub tokens a 2-hop Kuiper route may pass through. */
+const INTERMEDIATES = [
+  "So11111111111111111111111111111111111111112", // SOL
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+].map((m) => new PublicKey(m));
+
 const QUOTE_TAKER = new PublicKey("KuiperQuoteTaker111111111111111111111111111"); // placeholder taker for wallet-less quotes
 const MAX_CU = 1_400_000;
 
@@ -50,7 +57,7 @@ export class SwapService {
     readonly cache: PoolCache,
     readonly router: Router,
     private readonly jupiter: JupiterClient,
-    private readonly cfg: { feeWallet?: PublicKey; feeBps: number },
+    private readonly cfg: { feeWallet?: PublicKey; feeBps: number; routerProgramId?: PublicKey },
   ) {}
 
   async mintInfo(mint: PublicKey) {
@@ -90,7 +97,10 @@ export class SwapService {
     const fee = await this.platformFee(inputMint, req.amount);
     const netAmount = req.amount - (fee?.amount ?? 0n);
 
-    const kuiper = this.router.bestRoute(inputMint, outputMint, netAmount);
+    // Multi-hop needs the on-chain router; without it Kuiper quotes direct pairs only.
+    const kuiper = this.router.bestRoute(inputMint, outputMint, netAmount, {
+      intermediates: this.cfg.routerProgramId ? INTERMEDIATES : [],
+    });
     let jupiter: JupBuildResponse | null = null;
     let jupiterError: string | undefined;
     try {
@@ -111,14 +121,29 @@ export class SwapService {
     return { inAmount: req.amount, feeAmount: fee?.amount ?? 0n, netAmount, best, kuiper, jupiter, jupiterError, fee };
   }
 
+  /**
+   * Build + simulate the swap. If the preferred engine's transaction can't be built (e.g. a
+   * multi-hop Kuiper route too large for one tx without lookup tables), fall back to the other.
+   */
   async buildSwap(req: QuoteRequest & { taker: string; source?: Source }) {
-    const user = new PublicKey(req.taker);
     const q = await this.quote(req);
-    const source = req.source ?? q.best;
-    if (!source) throw new Error("no route found");
+    const first = req.source ?? q.best;
+    if (!first) throw new Error("no route found");
+    try {
+      return await this.assemble(req, q, first);
+    } catch (e) {
+      const other: Source = first === "kuiper" ? "jupiter" : "kuiper";
+      if (req.source || !(other === "kuiper" ? q.kuiper : q.jupiter)) throw e;
+      console.warn(`[swap] ${first} build failed (${(e as Error).message}); trying ${other}`);
+      return this.assemble(req, q, other);
+    }
+  }
+
+  private async assemble(req: QuoteRequest & { taker: string }, q: QuoteResult & { fee?: PlatformFee }, source: Source) {
+    const user = new PublicKey(req.taker);
     const inputMint = new PublicKey(req.inputMint);
     const outputMint = new PublicKey(req.outputMint);
-    const [inInfo, outInfo] = await Promise.all([this.mintInfo(inputMint), this.mintInfo(outputMint)]);
+    const [inInfo] = await Promise.all([this.mintInfo(inputMint), this.mintInfo(outputMint)]);
     const priority = await this.priorityFee();
 
     let ixs: TransactionInstruction[];
@@ -128,14 +153,17 @@ export class SwapService {
 
     if (source === "kuiper") {
       if (!q.kuiper) throw new Error("no Kuiper route for this pair/size");
+      const mints = [q.kuiper.inputMint, ...q.kuiper.hops.map((h) => h.outputMint)];
+      const tokenPrograms = new Map<string, PublicKey>();
+      for (const m of mints) tokenPrograms.set(m.toBase58(), (await this.mintInfo(m)).tokenProgram);
       ixs = await buildKuiperSwapInstructions({
         route: q.kuiper,
         user,
         slippageBps: req.slippageBps,
-        inputTokenProgram: inInfo.tokenProgram,
-        outputTokenProgram: outInfo.tokenProgram,
+        tokenPrograms,
         priorityMicroLamports: priority,
         platformFee: q.fee,
+        routerProgramId: this.cfg.routerProgramId,
       });
       outAmount = q.kuiper.outAmount;
       minOutAmount = (outAmount * BigInt(10_000 - req.slippageBps)) / 10_000n;
