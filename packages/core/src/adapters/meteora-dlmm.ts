@@ -6,7 +6,9 @@ import type { AccountMap, Amm, Quote, QuoteParams, SwapParams } from "../types.j
 
 // The SDK's ESM build imports `BN` as a named export from Anchor's CJS bundle, which Node's ESM
 // loader rejects. Loading the CJS build sidesteps it.
-const DLMM: typeof DLMMClass = createRequire(import.meta.url)("@meteora-ag/dlmm").default;
+const dlmmModule = createRequire(import.meta.url)("@meteora-ag/dlmm");
+// The CJS build exports the class as module.exports itself (with named exports attached).
+const DLMM: typeof DLMMClass = dlmmModule.default ?? dlmmModule;
 
 export const METEORA_DLMM_PROGRAM_ID = new PublicKey("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo");
 type DlmmInstance = Awaited<ReturnType<typeof DLMM.create>>;

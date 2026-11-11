@@ -39,12 +39,12 @@ const toIx = (ix: JupIx) =>
 export class JupiterClient {
   constructor(private readonly apiKey: string) {}
 
+  /** Works without a key on Jupiter's keyless tier (lower rate limits); a key from portal.jup.ag raises them. */
   get enabled() {
-    return this.apiKey.length > 0;
+    return true;
   }
 
   async build(p: { inputMint: string; outputMint: string; amount: bigint; taker: string; slippageBps: number; maxAccounts?: number }) {
-    if (!this.enabled) return null;
     const qs = new URLSearchParams({
       inputMint: p.inputMint,
       outputMint: p.outputMint,
@@ -54,7 +54,12 @@ export class JupiterClient {
       // leave room in the tx for our fee + compute-budget instructions
       maxAccounts: String(p.maxAccounts ?? 54),
     });
-    const res = await fetch(`${BASE}/build?${qs}`, { headers: { "x-api-key": this.apiKey }, signal: AbortSignal.timeout(4000) });
+    const get = () => fetch(`${BASE}/build?${qs}`, { headers: this.apiKey ? { "x-api-key": this.apiKey } : {}, signal: AbortSignal.timeout(5000) });
+    let res = await get();
+    if (res.status === 429 || res.status >= 500) {
+      await new Promise((r) => setTimeout(r, 1200)); // keyless tier rate-limits hard; one retry
+      res = await get();
+    }
     if (!res.ok) throw new Error(`jupiter /build ${res.status}: ${(await res.text()).slice(0, 200)}`);
     return (await res.json()) as JupBuildResponse;
   }

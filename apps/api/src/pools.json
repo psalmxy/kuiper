@@ -1,4 +1,177 @@
 [
-  { "kind": "orca-whirlpool", "address": "Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE", "note": "SOL/USDC 0.04%" },
-  { "kind": "meteora-dlmm", "address": "5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6", "note": "SOL/USDC" }
+  {
+    "kind": "orca-whirlpool",
+    "address": "Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE",
+    "note": "SOL/USDC (4,182,816 USDC side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "HJPjoWUrhoZzkNfRpHuieeFk9WcZWjwy6PBjZ81ngndJ",
+    "note": "SOL/USDC (140,380 USDC side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "5rCf1DM8LjKTw4YqhnoLcngyZYeNnQqztScTogYHAS6",
+    "note": "SOL/USDC (1,167,332 USDC side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "FwewVm8u6tFPGewAyHmWAqad9hmF7mvqxK4mJ7iNqqGC",
+    "note": "SOL/USDT (35,254 USDT side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "8r7y8jgFum6chfi9J4ukzrejW4GHExx9TDnmGQM6wPFv",
+    "note": "SOL/USDT (11,294 USDT side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "CyrzGrL9U9x9FfqfQiTi7kWsvJ9mK97tGxtPF1AV8E8d",
+    "note": "SOL/USDT (1,463 USDT side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4",
+    "note": "USDT/USDC (331,678 USDC side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "ARwi1S4DaiTG5DX7S4M4ZsrXqpMD1MrTmbu9ue2tpmEq",
+    "note": "USDT/USDC (79,719 USDC side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "C1MgLojNLWBKADvu9BHdtgzz1oZX4dZ5zGdGcgvvW8Wz",
+    "note": "JUP/SOL (3,812 SOL side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "FgTCR1ufcaTZMwZZYhNRhJm2K3HgMA8V8kXtdqyttm19",
+    "note": "JUP/SOL (61 SOL side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "C8Gr6AUuq9hEdSYJzoEpNcdjpojPZwqG5MtQbeouNNwg",
+    "note": "JUP/SOL (10,825 SOL side)"
+  },
+  {
+    "kind": "raydium-cpmm",
+    "address": "BakaWqcYAhwR2oGWBw3iHzmSiJqQ3j1uvvBm4DPxg1dU",
+    "note": "JUP/SOL (25 SOL side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "FYmLrqgfrZ6u1Qvfo48wnhGp4HxXeQP7SQB5USQyQCPQ",
+    "note": "JUP/USDC (12,639 USDC side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "4Ui9QdDNuUaAGqCPcDSp191QrixLzQiLxJ1Gnqvz3szP",
+    "note": "JUP/USDC (7,195 USDC side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "EAFXa2hgKu4J7pqYLB2oUozgyd8qKHzWPMFoEE9zEi3R",
+    "note": "JUP/USDC (1,000,058 USDC side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "2UhFnySoJi6c89aydGAGS7ZRemo2dbkFRhvSJqDX4gHJ",
+    "note": "JTO/SOL (512 SOL side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "93MjUKNKxazKmgS3GBX2Gj2BttEjJUyi7NYeyDHdHSc2",
+    "note": "JTO/USDC (11,362 USDC side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "Eqv1tJGkLFeH4giGy8vqKxF4NJBHtGR5cGmKG6cpVy4Z",
+    "note": "JTO/USDC (7,906 USDC side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "D3C5H4YU7rjhK7ePrGtK1Bhde4tfeiTr98axdZnA7tet",
+    "note": "RAY/SOL (450 SOL side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "27ZbVdmoUhG639CfqG6kW8a4VXZeGBi8Dd4HUXjVDxeS",
+    "note": "RAY/SOL (15 SOL side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "Cqc2v6yhK5NBgmhNoYBFYmUA5WR1UriYANa3wf7ijN7C",
+    "note": "RAY/SOL (23 SOL side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "A2J7vmG9xAdWUzYscN7oQssxZBFihwD3UonkWB8Kod1A",
+    "note": "RAY/USDC (6,841 USDC side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "5zpyutJu9ee6jFymDGoK7F6S5Kczqtc9FomP3ueKuyA9",
+    "note": "BONK/SOL (1,127 SOL side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "BqnpCdDLPV2pFdAaLnVidmn3G93RP2p5oRdGEY2sJGez",
+    "note": "BONK/SOL (805 SOL side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "AtcGozT6i1GR3wJAjVwRwmt7qbHqZrBUqKs2DcMAKoVe",
+    "note": "BONK/SOL (485 SOL side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "8QaXeHBrShJTdtN1rWCccBxpSVvKksQ2PCu5nufb2zbk",
+    "note": "BONK/USDC (12,617 USDC side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "5P6n5omLbLbP4kaPGL8etqQAHEx2UCkaUyvjLDnwV4EY",
+    "note": "BONK/USDC (1,251 USDC side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "31p1hptjhFo6ZD8oBqkfutNXQKGGPyi7YcEAfsyKW777",
+    "note": "BONK/USDC (34,246 USDC side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "Hp53XEtt4S8SvPCXarsLSdGfZBuUr5mMmZmX2DRNXQKp",
+    "note": "JitoSOL/SOL (37,329 SOL side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "4RedE6jkBz11zHp5kwEPuWJMi9BnRRUzSBqyR3jSvw7r",
+    "note": "JitoSOL/SOL (14 SOL side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "BoeMUkCLHchTD31HdXsbDExuZZfcUppSLpYtV3LZTH6U",
+    "note": "JitoSOL/SOL (6,974 SOL side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "HQcY5n2zP6rW74fyFEhWeBd3LnJpBcZechkvJpmdb8cx",
+    "note": "mSOL/SOL (1,908 SOL side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "2dBPJGLgNDZnzA32452zV2u6vensbo28dveBvecDg6X1",
+    "note": "mSOL/SOL (101 SOL side)"
+  },
+  {
+    "kind": "orca-whirlpool",
+    "address": "DtYKbQELgMZ3ihFUrCcCs9gy4djcUuhwgR7UpxVpP2Tg",
+    "note": "JupSOL/SOL (1,016 SOL side)"
+  },
+  {
+    "kind": "meteora-dlmm",
+    "address": "bNcdL9Hy85c9qb4hRavAUFtJUiyRPh3u96jerFqZQq6",
+    "note": "JupSOL/SOL (458 SOL side)"
+  }
 ]

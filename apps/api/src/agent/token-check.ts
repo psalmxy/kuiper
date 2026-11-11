@@ -81,7 +81,9 @@ export async function checkToken(connection: Connection, mintStr: string, jup?: 
   if (jup) {
     try {
       for (const w of await jup.shield(mintStr)) {
-        flags.push({ level: w.severity === "critical" || w.severity === "warning" ? "medium" : "low", text: `Jupiter Shield: ${w.message ?? w.type}` });
+        const serious = w.severity === "critical" || w.severity === "warning";
+        // Freeze/mint authority warnings are expected for regulated issuers (USDC, USDT…).
+        flags.push({ level: serious && !known ? "medium" : "low", text: `Jupiter Shield: ${w.message ?? w.type}` });
       }
     } catch {
       /* shield is advisory */

@@ -25,18 +25,29 @@ export interface TokenSearchResult {
 export class JupiterExtra {
   constructor(private readonly apiKey: string) {}
 
+  /** Keyless tier works for most endpoints at low rate limits; a key raises them. */
   get enabled() {
-    return this.apiKey.length > 0;
+    return true;
   }
 
-  private async call<T>(path: string, init?: RequestInit): Promise<T> {
-    if (!this.enabled) throw new Error("JUP_API_KEY not set");
-    const res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: { "x-api-key": this.apiKey, ...(init?.body ? { "Content-Type": "application/json" } : {}), ...init?.headers },
-      signal: AbortSignal.timeout(8000),
-    });
+  /** One retry on timeout / 429 / 5xx — Jupiter's keyless tier rate-limits aggressively. */
+  private async call<T>(path: string, init?: RequestInit, attempt = 0): Promise<T> {
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        ...init,
+        headers: { ...(this.apiKey ? { "x-api-key": this.apiKey } : {}), ...(init?.body ? { "Content-Type": "application/json" } : {}), ...init?.headers },
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (e) {
+      if (attempt === 0) return this.call<T>(path, init, 1);
+      throw new Error(`jupiter ${path}: ${(e as Error).message}`);
+    }
     const text = await res.text();
+    if ((res.status === 429 || res.status >= 500) && attempt === 0) {
+      await new Promise((r) => setTimeout(r, 1500));
+      return this.call<T>(path, init, 1);
+    }
     if (!res.ok) throw new Error(`jupiter ${path} ${res.status}: ${text.slice(0, 200)}`);
     return JSON.parse(text) as T;
   }
@@ -58,8 +69,17 @@ export class JupiterExtra {
     });
   }
 
+  /** Earn vaults. `address` is the receipt (jl*) token mint, `assetAddress` the underlying; rates are in bps. */
   async lendTokens() {
-    return this.call<{ asset: { address: string; symbol: string }; supplyRate?: number | string; totalRate?: number | string }[]>("/lend/v1/earn/tokens");
+    return this.call<{ address: string; symbol: string; assetAddress: string; decimals: number; totalRate: string; supplyRate: string; rewardsRate: string }[]>("/lend/v1/earn/tokens");
+  }
+
+  /** Raw deposit instructions, so we can add the receipt-token ATA the deposit expects to exist. */
+  async lendDepositInstructions(p: { asset: string; amount: bigint; signer: string }) {
+    return this.call<{ instructions: { programId: string; accounts: { pubkey: string; isSigner: boolean; isWritable: boolean }[]; data: string }[] }>(
+      "/lend/v1/earn/deposit-instructions",
+      { method: "POST", body: JSON.stringify({ asset: p.asset, amount: p.amount.toString(), signer: p.signer }) },
+    );
   }
 
   async borrowVaults() {

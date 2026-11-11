@@ -57,10 +57,13 @@ cp .env.example .env          # set RPC_URL (private RPC strongly recommended), 
 pnpm test                     # core unit tests
 pnpm --filter @kuiper/api test   # agent + token-check tests
 pnpm program:test             # build programs to SBF + LiteSVM tests (needs cargo-build-sbf)
+pnpm discover:pools           # (re)index pools from chain → apps/api/src/pools.json
+pnpm verify:pool <kind> <pool> <amount>   # adapter quote vs simulated on-chain swap
+pnpm --filter @kuiper/api smoke:agent      # build + simulate every agent ticket type
 pnpm dev                      # api on :8787, web on :3000
 ```
 
-Get a free Jupiter key at <https://portal.jup.ag>. Without it Kuiper runs router-only.
+Jupiter's keyless tier works but rate-limits hard (frequent 429s); get a free key at <https://portal.jup.ag> for a steady fallback. On the public RPC, set `SIM_ACCOUNTS_PER_CALL=2` (default) and a slow `POOL_REFRESH_MS`; with Helius/Triton raise both.
 
 ### Before you put real money through it
 
@@ -78,6 +81,27 @@ Get a free Jupiter key at <https://portal.jup.ag>. Without it Kuiper runs router
    FEE_KEYPAIR=~/.config/solana/fee.json pnpm fee-accounts EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
    ```
 4. Do a small swap from a burner wallet.
+
+## Live mainnet results (Nov 11, 2026)
+
+Run against Solana mainnet from the public RPC, with nothing signed or sent; every swap was simulated from a public exchange wallet.
+
+**Adapters: quote = simulated on-chain output, exact to the base unit**
+
+| Pool | Trade | Quote | On-chain |
+|---|---|---|---|
+| Orca Whirlpool SOL/USDC | 1 SOL → USDC | 84,809,849 | 84,809,849 ✅ |
+| Orca Whirlpool SOL/USDC | 500 USDC → SOL | 5,891,080,762 | 5,891,080,762 ✅ |
+| Meteora DLMM SOL/USDC | 1 SOL → USDC | 84,796,018 | 84,796,018 ✅ |
+| Raydium CPMM SOL/USDC | 0.01 SOL → USDC | 842,192 | 842,192 ✅ |
+
+**Full swap transactions built by `/swap` and simulated:** 1 SOL→USDC, 50 USDC→SOL, 50 USDC→BONK (split 82% Meteora / 18% Orca), 1 SOL→JitoSOL, 1 SOL→JUP all pass, using 36k–82k compute units.
+
+**Agent tickets simulated on mainnet:** stake (1 SOL → 0.7635 JitoSOL), lend (100 USDC → 93.52 jlUSDC at ~4.5% APY), borrow (50 USDC against 2 SOL), recurring (300 USDC → JUP over 3 days), and token checks all pass.
+
+**Kuiper vs Jupiter:** on the pools Kuiper indexes, Kuiper ties Jupiter on LSTs (JitoSOL ±0.000%). Jupiter wins SOL/USDC by ~0.1% through prop AMMs (GoonFi, HumidiFi, SolFi…) and some long-tail pairs (JTO −0.4%) through venues Kuiper doesn't integrate yet (Raydium CLMM, 1DEX, ZeroFi). The hybrid design handles this today by always giving the user the better of the two; closing the gap means more adapters (see roadmap).
+
+**Pool index:** `pnpm discover:pools` indexes 14 pairs across the three DEXes from chain and keeps 35 pools with real depth (`apps/api/src/pools.json`). Raydium's CPMM pools are mostly thin for majors; Raydium's depth sits in CLMM/AMM v4.
 
 ## Deploying the router
 
@@ -104,7 +128,7 @@ Then set `KUIPER_ROUTER_PROGRAM_ID` in `.env` and update `KUIPER_ROUTER_PROGRAM_
 - [x] **Agent.** Swap / stake / lend / borrow / recurring tickets with token checks and simulation.
 - [ ] **Phase 3 — Streaming state.** Yellowstone gRPC account subscriptions into `PoolCache`; DLMM adapter moved onto the batched `AccountMap` path.
 - [ ] **Phase 4 — Graph router.** Token graph over all pools, top-k paths (modified Bellman-Ford / k-shortest-paths on −log(rate)), then split optimisation across paths.
-- [ ] **Phase 5 — More venues.** Raydium AMM v4 & CLMM, pump.swap, Meteora DAMM v2, Phoenix/Manifest order books; Token-2022 transfer fees.
+- [ ] **Phase 5 — More venues.** Highest impact first, from the live comparison: **Raydium CLMM**, then AMM v4, pump.swap, Meteora DAMM v2, Phoenix/Manifest order books; Token-2022 transfer fees. Prop AMMs (HumidiFi, GoonFi, SolFi, Tessera) win most SOL/USDC flow but generally only expose integration to aggregators by agreement.
 - [ ] **Phase 6 — Execution.** Jito bundles / Jupiter `/tx/v1/submit` landing, address lookup tables for Kuiper routes, gasless via integrator payer.
 - [ ] **Phase 7 — Products.** Limit orders, DCA, referral program, token list + prices.
 

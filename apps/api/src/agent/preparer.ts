@@ -1,5 +1,5 @@
-import { NATIVE_MINT } from "@solana/spl-token";
-import { PublicKey, VersionedTransaction, type Connection } from "@solana/web3.js";
+import { NATIVE_MINT, createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { ComputeBudgetProgram, PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction, type Connection } from "@solana/web3.js";
 import type { SwapService } from "../service.js";
 import type { JupiterExtra } from "./jupiter-extra.js";
 import { simulateWithBalanceChanges, type WatchMint } from "./simulate.js";
@@ -162,19 +162,49 @@ export class Preparer {
   async lend(p: { user: string; asset: string; amount: string }): Promise<Ticket> {
     const a = await this.resolve(p.asset);
     const amount = toBaseUnits(p.amount, a.decimals);
-    const [{ transaction }, check] = await Promise.all([this.jup.lendDeposit({ asset: a.mint, amount, signer: p.user }), checkToken(this.connection, a.mint, this.jup, a.symbol)]);
+    const vaults = await this.jup.lendTokens();
+    const vault = vaults.find((v) => v.assetAddress === a.mint);
+    if (!vault) throw new Error(`Jupiter Earn has no ${a.symbol} vault (available: ${vaults.map((v) => v.symbol.replace(/^jl/, "")).join(", ")})`);
+    const user = new PublicKey(p.user);
+    const receiptMint = new PublicKey(vault.address);
+    const receiptProgram = (await this.connection.getAccountInfo(receiptMint))!.owner;
+    const [{ instructions }, check, { blockhash }] = await Promise.all([
+      this.jup.lendDepositInstructions({ asset: a.mint, amount, signer: p.user }),
+      checkToken(this.connection, a.mint, this.jup, a.symbol),
+      this.connection.getLatestBlockhash("confirmed"),
+    ]);
+    const priority = await this.swaps.priorityFee();
+    const ixs = [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priority }),
+      // The deposit expects the receipt-token account (e.g. jlUSDC) to exist already.
+      createAssociatedTokenAccountIdempotentInstruction(user, getAssociatedTokenAddressSync(receiptMint, user, true, receiptProgram), user, receiptMint, receiptProgram),
+      ...instructions.map(
+        (i) =>
+          new TransactionInstruction({
+            programId: new PublicKey(i.programId),
+            keys: i.accounts.map((k) => ({ pubkey: new PublicKey(k.pubkey), isSigner: k.isSigner, isWritable: k.isWritable })),
+            data: Buffer.from(i.data, "base64"),
+          }),
+      ),
+    ];
+    const tx = new VersionedTransaction(new TransactionMessage({ payerKey: user, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message());
+    const receipt = { mint: vault.address, symbol: vault.symbol, decimals: vault.decimals, tokenProgram: receiptProgram };
+    const apy = (Number(vault.totalRate) / 100).toFixed(2);
     return this.finalize({
       kind: "lend",
       title: `Lend ${p.amount} ${a.symbol} on Jupiter Earn`,
-      summary: `Deposit ${p.amount} ${a.symbol} into Jupiter Lend's Earn vault to earn interest. You receive a receipt token you can redeem later.`,
+      summary: `Deposit ${p.amount} ${a.symbol} into Jupiter Lend's Earn vault (currently ~${apy}% APY, variable). You receive ${vault.symbol}, redeemable for your ${a.symbol} plus interest.`,
       details: [
         { label: "Deposit", value: `${p.amount} ${a.symbol}` },
+        { label: "Current APY", value: `${apy}% (variable: supply ${(Number(vault.supplyRate) / 100).toFixed(2)}% + rewards ${(Number(vault.rewardsRate) / 100).toFixed(2)}%)` },
+        { label: "You receive", value: `${vault.symbol} (receipt token)` },
         { label: "Protocol", value: "Jupiter Lend (Earn)" },
         { label: "Withdraw", value: "Any time, subject to available vault liquidity" },
       ],
-      tx: fromB64(transaction),
+      tx,
       user: p.user,
-      watch: [a],
+      watch: [a, receipt],
       checks: [check],
       warnings: ["Lending carries smart-contract risk and, in stress, temporary withdrawal delays if the vault is fully utilised."],
       refresh: () => this.lend(p),

@@ -63,6 +63,21 @@ describe("Router", () => {
     expect(r.outAmount).toBeGreaterThan(0n);
   });
 
+  it("never returns a split that leaves part of the order unallocated (pools with limited capacity)", () => {
+    // Both pools can fill 60% of the order alone but not 100%; together they could, but each
+    // reports notEnoughLiquidity past its cap, so the greedy pass can get stuck.
+    class Capped extends FakeCpAmm {
+      constructor(label: string, private cap: bigint) { super(label, 10n ** 12n, 10n ** 12n); }
+      quote(p: QuoteParams): Quote {
+        const q = super.quote(p);
+        return p.amount > this.cap ? { ...q, outAmount: 0n, notEnoughLiquidity: true } : q;
+      }
+    }
+    const amount = 10_000n;
+    const r = new Router(() => [new Capped("a", 6_000n), new Capped("b", 3_000n)]).bestRoute(A, B, amount);
+    if (r) expect(r.hops[0]!.legs.reduce((s, l) => s + l.inAmount, 0n)).toBe(amount);
+  });
+
   it("ignores inactive pools and returns null when nothing can fill", () => {
     const off = new FakeCpAmm("off", 10n ** 12n, 10n ** 12n, 25n, false);
     expect(new Router(() => [off]).bestRoute(A, B, 1_000n)).toBeNull();

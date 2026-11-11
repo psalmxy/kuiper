@@ -10,7 +10,9 @@
     "verify:pool": "tsx --env-file-if-exists=../../.env scripts/verify-pool.ts",
     "discover:cpmm": "tsx --env-file-if-exists=../../.env scripts/discover-cpmm-pools.ts",
     "fee-accounts": "tsx --env-file-if-exists=../../.env scripts/create-fee-accounts.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "discover:pools": "tsx --env-file-if-exists=../../.env scripts/discover-pools.ts",
+    "smoke:agent": "tsx --env-file-if-exists=../../.env scripts/smoke-agent.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",

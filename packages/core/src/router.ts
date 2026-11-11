@@ -108,6 +108,9 @@ export class Router {
     const top = singles.slice(0, this.opts.maxLegs).map((s) => s.amm);
     if (top.length >= 2) {
       const alloc = this.greedySplit(top, inputMint, outputMint, amount);
+      // Pools that run out of in-range liquidity can leave the order partly unallocated: no split then.
+      const allocated = [...alloc.values()].reduce((a, b) => a + b, 0n);
+      if (allocated !== amount) return this.single(first, inputMint, outputMint, amount);
       this.refineTopTwo(alloc, inputMint, outputMint);
       const splitOut = [...alloc].reduce((s, [amm, a]) => s + this.out(amm, inputMint, outputMint, a), 0n);
       if (splitOut > bestOut + (bestOut * BigInt(this.opts.minSplitImprovementBps)) / 10_000n) bestAlloc = alloc;
@@ -120,6 +123,11 @@ export class Router {
         return { amm, inAmount: a, outAmount: q.outAmount, feeAmount: q.feeAmount };
       });
     return { inputMint, outputMint, inAmount: amount, outAmount: legs.reduce((s, l) => s + l.outAmount, 0n), legs };
+  }
+
+  private single(s: { amm: Amm }, inputMint: PublicKey, outputMint: PublicKey, amount: bigint): RouteHop {
+    const q = s.amm.quote({ inputMint, outputMint, amount });
+    return { inputMint, outputMint, inAmount: amount, outAmount: q.outAmount, legs: [{ amm: s.amm, inAmount: amount, outAmount: q.outAmount, feeAmount: q.feeAmount }] };
   }
 
   /** Hand out `chunks` slices, each to the pool with the best marginal output. Optimal for concave curves. */

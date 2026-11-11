@@ -9,7 +9,7 @@
  *   pnpm verify:pool orca-whirlpool Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE 1000000000
  */
 import { PoolCache, type PoolKind } from "@kuiper/core";
-import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { NATIVE_MINT, createAssociatedTokenAccountIdempotentInstruction, createSyncNativeInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { ComputeBudgetProgram, Connection, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 
 const [kind, address, amountArg, inputArg] = process.argv.slice(2);
@@ -31,23 +31,45 @@ const outputMint = inputMint.equals(m0) ? m1 : m0;
 const quote = amm.quote({ inputMint, outputMint, amount });
 console.log(`${amm.label} ${address}\n  quote: ${amount} ${inputMint.toBase58().slice(0, 6)}… → ${quote.outAmount} ${outputMint.toBase58().slice(0, 6)}…`);
 
-// Find a real holder: a system-owned wallet whose ATA holds enough of the input token.
+// Find a real holder. Cheap path first: well-known high-balance wallets (or HOLDER=<wallet>).
+// SOL input is wrapped inside the simulated tx, so the holder only needs lamports.
 const programOf = async (mint: PublicKey) => (await connection.getAccountInfo(mint))!.owner;
 const [inProg, outProg] = await Promise.all([programOf(inputMint), programOf(outputMint)]);
-const largest = await connection.getTokenLargestAccounts(inputMint);
+const inIsSol = inputMint.equals(NATIVE_MINT);
+const CANDIDATES = [
+  process.env.HOLDER,
+  "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhJibQDc", // exchange hot wallets (public)
+  "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+  "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S",
+  "FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiouN5",
+].filter(Boolean) as string[];
 let holder: PublicKey | null = null;
-for (const acc of largest.value.slice(0, 15)) {
-  if (BigInt(acc.amount) < amount) continue;
-  const info = await connection.getParsedAccountInfo(acc.address);
-  const owner = new PublicKey((info.value?.data as any).parsed.info.owner);
-  const ownerAcc = await connection.getAccountInfo(owner);
-  const isAta = getAssociatedTokenAddressSync(inputMint, owner, true, inProg).equals(acc.address);
-  if (ownerAcc?.owner.equals(SystemProgram.programId) && ownerAcc.lamports > 10_000_000 && isAta) {
-    holder = owner;
-    break;
+for (const c of CANDIDATES) {
+  const owner = new PublicKey(c);
+  const acc = await connection.getAccountInfo(owner);
+  if (!acc?.owner.equals(SystemProgram.programId)) continue;
+  if (inIsSol) {
+    if (BigInt(acc.lamports) > amount + 100_000_000n) { holder = owner; break; }
+  } else {
+    const bal = await connection.getTokenAccountBalance(getAssociatedTokenAddressSync(inputMint, owner, true, inProg)).catch(() => null);
+    if (bal && BigInt(bal.value.amount) >= amount && acc.lamports > 10_000_000) { holder = owner; break; }
   }
 }
-if (!holder) throw new Error("no suitable holder found among largest accounts — try a smaller amount");
+if (!holder) {
+  const largest = await connection.getTokenLargestAccounts(inputMint);
+  for (const acc of largest.value.slice(0, 15)) {
+    if (BigInt(acc.amount) < amount) continue;
+    const info = await connection.getParsedAccountInfo(acc.address);
+    const owner = new PublicKey((info.value?.data as any).parsed.info.owner);
+    const ownerAcc = await connection.getAccountInfo(owner);
+    const isAta = getAssociatedTokenAddressSync(inputMint, owner, true, inProg).equals(acc.address);
+    if (ownerAcc?.owner.equals(SystemProgram.programId) && ownerAcc.lamports > 10_000_000 && isAta) {
+      holder = owner;
+      break;
+    }
+  }
+}
+if (!holder) throw new Error("no suitable holder found — pass HOLDER=<wallet that holds the input token>");
 
 const src = getAssociatedTokenAddressSync(inputMint, holder, true, inProg);
 const dst = getAssociatedTokenAddressSync(outputMint, holder, true, outProg);
@@ -56,6 +78,13 @@ const preAmount = pre ? pre.data.readBigUInt64LE(64) : 0n;
 
 const ixs = [
   ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+  ...(inIsSol
+    ? [
+        createAssociatedTokenAccountIdempotentInstruction(holder, src, holder, NATIVE_MINT),
+        SystemProgram.transfer({ fromPubkey: holder, toPubkey: src, lamports: amount }),
+        createSyncNativeInstruction(src),
+      ]
+    : []),
   createAssociatedTokenAccountIdempotentInstruction(holder, dst, holder, outputMint, outProg),
   ...(await amm.swapInstructions({
     user: holder,

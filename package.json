@@ -1,7 +1,7 @@
 {
   "name": "kuiper",
   "private": true,
-  "description": "Kuiper — a hybrid Solana DEX aggregator (own router + Jupiter fallback)",
+  "description": "Kuiper \u2014 a hybrid Solana DEX aggregator (own router + Jupiter fallback)",
   "packageManager": "pnpm@10.28.0",
   "scripts": {
     "dev": "pnpm -r --parallel --filter ./apps/* dev",
@@ -15,7 +15,8 @@
     "fee-accounts": "pnpm --filter @kuiper/api fee-accounts",
     "program:build": "cargo build-sbf --manifest-path programs/kuiper-router/Cargo.toml --arch v0 --sbf-out-dir target/deploy",
     "program:build:test": "cargo build-sbf --manifest-path programs/mock-amm/Cargo.toml --arch v0 --sbf-out-dir target/deploy && cargo build-sbf --manifest-path programs/kuiper-router/Cargo.toml --arch v0 --sbf-out-dir target/deploy-test --features test-dex",
-    "program:test": "pnpm program:build:test && cargo test -p kuiper-router-tests"
+    "program:test": "pnpm program:build:test && cargo test -p kuiper-router-tests",
+    "discover:pools": "pnpm --filter @kuiper/api discover:pools"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
