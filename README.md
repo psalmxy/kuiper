@@ -4,7 +4,11 @@ A Solana DEX aggregator built the way Jupiter is built — own routing engine, o
 
 ![Kuiper swap UI](docs/ui.png)
 
-Every quote races **Kuiper's router** against **Jupiter's `/swap/v2/build`** on the same net amount, and the user gets whichever pays more. As adapters and the router program mature, Kuiper wins more routes and Jupiter becomes optional.
+It has three parts:
+
+1. **Swap** — every quote races **Kuiper's router** against **Jupiter's `/swap/v2/build`** on the same net amount, and the user gets whichever pays more. As adapters and the router program mature, Kuiper wins more routes and Jupiter becomes optional.
+2. **Router program** (`programs/kuiper-router`) — Anchor program that executes multi-hop and split routes atomically, feeding each hop the amount the previous hop *actually* produced and enforcing one final min-out. CPI only to whitelisted DEXes.
+3. **Agent** (`/agent`) — ask in plain English for a swap, stake, loan or recurring buy. Claude does the legwork (route, token safety check, simulation) and hands you a **ticket**: what it does, the numbers, balance changes from simulation, token risk flags, warnings. **Nothing moves until you approve the ticket in your own wallet** — the server never holds keys.
 
 ## How it maps to Jupiter
 
@@ -22,10 +26,28 @@ Every quote races **Kuiper's router** against **Jupiter's `/swap/v2/build`** on 
 ## Repo layout
 
 ```
-packages/core   router, Amm interface, adapters, pool cache, tx builder  (+ vitest)
-apps/api        Hono service: pool cache loop, Kuiper-vs-Jupiter quoting, tx building
-apps/web        Next.js 16 swap UI
+packages/core            router (direct, split, 2-hop), Amm interface, adapters, pool cache, tx builders  (+ vitest)
+programs/kuiper-router   on-chain router (Anchor 1.2)
+programs/mock-amm        test-only CP AMM used by the LiteSVM tests
+programs/tests           LiteSVM integration tests against the compiled .so files
+apps/api                 Hono service: quoting, tx building, DeFi agent + tickets
+apps/web                 Next.js 16: swap page + agent page
 ```
+
+## The agent
+
+| Ask | What it prepares | Backed by |
+|---|---|---|
+| "swap 2 SOL to USDC" | Swap ticket | Kuiper router vs Jupiter, best wins |
+| "stake 5 SOL" | SOL → JitoSOL / JupSOL / mSOL | Liquid staking via swap |
+| "lend 500 USDC" | Earn deposit | Jupiter Lend Earn API |
+| "borrow 200 USDC against 3 SOL" | New borrow position | Jupiter Lend Borrow API (experimental) |
+| "buy JUP with 300 USDC weekly for 6 weeks" | Recurring order | Jupiter Recurring API |
+| "is BONK safe?" | Token report | On-chain checks + Jupiter Shield |
+
+Every ticket includes: plain-English summary, key numbers, **simulation of the exact transaction** with your balance changes, **token checks** (mint/freeze authority, Token-2022 traps like permanent delegate, transfer tax, non-transferable, holder concentration, Jupiter Shield warnings), and warnings. Tickets expire after ~60s (blockhash lifetime) and can be refreshed. Failed simulations can't be approved.
+
+Set `ANTHROPIC_API_KEY` (and optionally `AGENT_MODEL`, default `claude-sonnet-5-5`) to enable it.
 
 ## Quick start
 
@@ -33,6 +55,8 @@ apps/web        Next.js 16 swap UI
 pnpm install
 cp .env.example .env          # set RPC_URL (private RPC strongly recommended), JUP_API_KEY, FEE_WALLET
 pnpm test                     # core unit tests
+pnpm --filter @kuiper/api test   # agent + token-check tests
+pnpm program:test             # build programs to SBF + LiteSVM tests (needs cargo-build-sbf)
 pnpm dev                      # api on :8787, web on :3000
 ```
 
@@ -55,9 +79,20 @@ Get a free Jupiter key at <https://portal.jup.ag>. Without it Kuiper runs router
    ```
 4. Do a small swap from a burner wallet.
 
+## Deploying the router
+
+```bash
+anchor keys sync          # generates YOUR program keypair and updates declare_id! + Anchor.toml
+pnpm program:build        # target/deploy/kuiper_router.so (SBPF v0, ~105 KB)
+solana program deploy target/deploy/kuiper_router.so --program-id target/deploy/kuiper_router-keypair.json
+```
+
+Then set `KUIPER_ROUTER_PROGRAM_ID` in `.env` and update `KUIPER_ROUTER_PROGRAM_ID` in `packages/core/src/router-program.ts`. Deploy rent for a ~105 KB program is roughly 1.5 SOL. Get it audited before routing meaningful volume through it.
+
 ## Design notes
 
-- **Why splits only, no multi-hop (yet).** Chaining A→B→C atomically needs a router program that passes hop 1's *actual* output into hop 2 — that's what Jupiter's on-chain program does. Without it, multi-hop leaves dust or over-reverts. So v1 executes direct-pair routes (single or split, every leg with its own min-out, all in one tx), and multi-hop goes to Jupiter.
+- **Multi-hop needs the program.** Chaining A→B→C atomically needs something on-chain that passes hop 1's *actual* output into hop 2. The router program measures each hop's output as a balance delta and patches it into the next DEX instruction before the CPI. Until it's deployed (`KUIPER_ROUTER_PROGRAM_ID` unset), Kuiper quotes direct pairs only and multi-hop goes to Jupiter.
+- **Agent safety.** The agent can only call prepare/read tools. Tickets carry an unsigned transaction; the user's wallet is the only signer. The submit endpoint checks the fee payer is the ticket's wallet. Recurring/Lend transactions come from Jupiter's APIs and are simulated the same way before you see them.
 - **Why `/build`, not `/order`, for the fallback.** `/build` returns raw instructions we can compose with our fee instruction, and Jupiter charges no swap fee on it. `/order` transactions can't be modified.
 - **Fair comparison.** The platform fee is deducted *before* quoting, and both engines quote the same net amount.
 - **Safety defaults.** Paused/not-yet-open CPMM pools and Token-2022 CPMM pools are skipped (transfer-fee math not implemented). Every swap is simulated server-side before the user is asked to sign.
@@ -65,7 +100,8 @@ Get a free Jupiter key at <https://portal.jup.ag>. Without it Kuiper runs router
 ## Roadmap
 
 - [x] **Phase 1 — Hybrid aggregator.** Adapters (CPMM, Whirlpool, DLMM), split router, Jupiter fallback, fee, UI.
-- [ ] **Phase 2 — Kuiper router program (Anchor).** `route` instruction that CPIs each hop with the real intermediate amount and enforces a single final `min_out`. Unlocks multi-hop + mixed split/hop routes, and lets other programs CPI into Kuiper.
+- [x] **Phase 2 — Kuiper router program (Anchor).** Built and tested in LiteSVM. **Not deployed yet** — see "Deploying the router" below.
+- [x] **Agent.** Swap / stake / lend / borrow / recurring tickets with token checks and simulation.
 - [ ] **Phase 3 — Streaming state.** Yellowstone gRPC account subscriptions into `PoolCache`; DLMM adapter moved onto the batched `AccountMap` path.
 - [ ] **Phase 4 — Graph router.** Token graph over all pools, top-k paths (modified Bellman-Ford / k-shortest-paths on −log(rate)), then split optimisation across paths.
 - [ ] **Phase 5 — More venues.** Raydium AMM v4 & CLMM, pump.swap, Meteora DAMM v2, Phoenix/Manifest order books; Token-2022 transfer fees.
