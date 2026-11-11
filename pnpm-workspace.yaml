@@ -1,0 +1,8 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+onlyBuiltDependencies:
+  - bigint-buffer
+  - bufferutil
+  - utf-8-validate
+  - esbuild

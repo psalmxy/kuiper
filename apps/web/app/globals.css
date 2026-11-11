@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@theme {
+  --color-void: #07090f;
+  --color-hull: #0e121b;
+  --color-panel: #141a26;
+  --color-line: #222b3b;
+  --color-dim: #7b8698;
+  --color-ice: #8be3ff;
+  --color-ice-deep: #2bb6e6;
+  --color-ok: #5ee6a8;
+  --color-warn: #ffb547;
+  --color-bad: #ff6b81;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+html,
+body {
+  background: var(--color-void);
+  color: #e8edf5;
+}
+
+body {
+  background-image:
+    radial-gradient(1200px 600px at 50% -10%, rgba(43, 182, 230, 0.12), transparent 60%),
+    radial-gradient(1px 1px at 20% 30%, rgba(255, 255, 255, 0.35), transparent),
+    radial-gradient(1px 1px at 70% 60%, rgba(255, 255, 255, 0.25), transparent),
+    radial-gradient(1px 1px at 40% 80%, rgba(255, 255, 255, 0.2), transparent),
+    radial-gradient(1px 1px at 85% 20%, rgba(255, 255, 255, 0.3), transparent);
+  min-height: 100vh;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* wallet-adapter button, restyled to match */
+.wallet-adapter-button-trigger {
+  background: var(--color-panel) !important;
+  border: 1px solid var(--color-line) !important;
+  border-radius: 12px !important;
+  height: 40px !important;
+  font-size: 14px !important;
+}

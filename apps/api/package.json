@@ -1,0 +1,28 @@
+{
+  "name": "@kuiper/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/server.ts",
+    "start": "tsx --env-file-if-exists=../../.env src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "verify:pool": "tsx --env-file-if-exists=../../.env scripts/verify-pool.ts",
+    "discover:cpmm": "tsx --env-file-if-exists=../../.env scripts/discover-cpmm-pools.ts",
+    "fee-accounts": "tsx --env-file-if-exists=../../.env scripts/create-fee-accounts.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.0",
+    "@kuiper/core": "workspace:*",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4",
+    "hono": "^4.10.0",
+    "zod": "^3.25.0",
+    "bs58": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  }
+}
