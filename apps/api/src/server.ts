@@ -21,6 +21,7 @@ const service = new SwapService(connection, cache, router, jupiter, {
   feeWallet: env.FEE_WALLET ? new PublicKey(env.FEE_WALLET) : undefined,
   feeBps: env.PLATFORM_FEE_BPS,
   routerProgramId: env.KUIPER_ROUTER_PROGRAM_ID ? new PublicKey(env.KUIPER_ROUTER_PROGRAM_ID) : undefined,
+  sender: env.SENDER_URL ? { url: env.SENDER_URL, tipLamports: env.SENDER_TIP_LAMPORTS } : undefined,
 });
 
 const tickets = new TicketStore();
@@ -106,6 +107,7 @@ app.get("/health", (c) =>
     lastRefreshMsAgo: cache.lastRefresh ? Date.now() - cache.lastRefresh : null,
     jupiterFallback: jupiter.enabled,
     multiHop: !!env.KUIPER_ROUTER_PROGRAM_ID,
+    sender: env.SENDER_URL ? { url: env.SENDER_URL.split("?")[0], tipLamports: env.SENDER_TIP_LAMPORTS } : false,
     agent: !!agent,
   }),
 );
@@ -147,12 +149,11 @@ app.post("/swap", async (c) => {
   });
 });
 
-/** Relay a signed tx with retries. (Swap to Jito / Jupiter /tx/v1/submit for better landing.) */
+/** Land a signed tx: Helius Sender (fast path) when configured, else RPC. */
 app.post("/send", async (c) => {
   const { signedTransaction } = z.object({ signedTransaction: z.string() }).parse(await c.req.json());
   const tx = VersionedTransaction.deserialize(Buffer.from(signedTransaction, "base64"));
-  const signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 3 });
-  return c.json({ signature });
+  return c.json(await service.broadcast(tx));
 });
 
 // ---------- DeFi agent ----------
@@ -196,7 +197,7 @@ app.post("/agent/tickets/:id/submit", async (c) => {
     }
     signature = r.signature;
   } else {
-    signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 3 });
+    signature = (await service.broadcast(tx)).signature;
   }
   t.status = "submitted";
   t.signature = signature;

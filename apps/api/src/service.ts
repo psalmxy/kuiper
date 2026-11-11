@@ -3,6 +3,8 @@ import {
   Router,
   buildKuiperSwapInstructions,
   platformFeeInstructions,
+  sendViaSender,
+  senderTipInstruction,
   type PlatformFee,
   type Route,
 } from "@kuiper/core";
@@ -57,7 +59,13 @@ export class SwapService {
     readonly cache: PoolCache,
     readonly router: Router,
     private readonly jupiter: JupiterClient,
-    private readonly cfg: { feeWallet?: PublicKey; feeBps: number; routerProgramId?: PublicKey },
+    private readonly cfg: {
+      feeWallet?: PublicKey;
+      feeBps: number;
+      routerProgramId?: PublicKey;
+      /** Helius Sender: adds a tip ix to every tx we build and lands via Sender. */
+      sender?: { url: string; tipLamports: number };
+    },
   ) {}
 
   async mintInfo(mint: PublicKey) {
@@ -180,6 +188,8 @@ export class SwapService {
       minOutAmount = BigInt(q.jupiter.otherAmountThreshold);
     }
 
+    if (this.cfg.sender) ixs.push(senderTipInstruction(user, this.cfg.sender.tipLamports));
+
     // Simulate, then right-size the compute limit (1.2x used) — same recipe Jupiter documents for /build.
     const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash("confirmed");
     const compile = () =>
@@ -202,7 +212,28 @@ export class SwapService {
       outAmount,
       minOutAmount,
       computeUnits: used,
+      landingTipLamports: this.cfg.sender?.tipLamports ?? 0,
     };
+  }
+
+  get senderTip() {
+    return this.cfg.sender?.tipLamports ?? 0;
+  }
+
+  /**
+   * Land a signed transaction: Helius Sender when configured (fast path, needs the tip ix),
+   * falling back to the RPC if Sender rejects it (e.g. a tx built without a tip).
+   */
+  async broadcast(tx: VersionedTransaction): Promise<{ signature: string; via: "sender" | "rpc" }> {
+    const raw = Buffer.from(tx.serialize());
+    if (this.cfg.sender) {
+      try {
+        return { signature: await sendViaSender(this.cfg.sender.url, raw.toString("base64")), via: "sender" };
+      } catch (e) {
+        console.warn(`[send] ${(e as Error).message}; falling back to RPC`);
+      }
+    }
+    return { signature: await this.connection.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 3 }), via: "rpc" };
   }
 
   private priorityCache = { value: 10_000, at: 0 };

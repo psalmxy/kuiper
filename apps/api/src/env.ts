@@ -13,6 +13,14 @@ const schema = z.object({
   /** For the DeFi agent (/agent/chat). */
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   AGENT_MODEL: z.string().default("claude-sonnet-5-5"),
+  /**
+   * Helius Sender endpoint for fast landing. Empty string disables it (plain RPC submit).
+   * Default: global HTTPS, SWQOS-only tier (0.000005 SOL min tip) with MEV protection.
+   * On a server, a regional HTTP endpoint near you is faster, e.g. http://fra-sender.helius-rpc.com/fast?swqos_only=true&mev-protect=true
+   */
+  SENDER_URL: z.string().default("https://sender.helius-rpc.com/fast?swqos_only=true&mev-protect=true"),
+  /** Tip added to every transaction sent via Sender. SWQOS-only minimum is 5000 lamports (0.000005 SOL). */
+  SENDER_TIP_LAMPORTS: z.coerce.number().int().min(0).default(5_000),
 });
 
 export const env = schema.parse(process.env);

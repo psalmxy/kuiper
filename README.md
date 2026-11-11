@@ -116,6 +116,7 @@ Then set `KUIPER_ROUTER_PROGRAM_ID` in `.env` and update `KUIPER_ROUTER_PROGRAM_
 ## Design notes
 
 - **Multi-hop needs the program.** Chaining A→B→C atomically needs something on-chain that passes hop 1's *actual* output into hop 2. The router program measures each hop's output as a balance delta and patches it into the next DEX instruction before the CPI. Until it's deployed (`KUIPER_ROUTER_PROGRAM_ID` unset), Kuiper quotes direct pairs only and multi-hop goes to Jupiter.
+- **Landing.** Transactions go out through Helius Sender (SWQOS-only tier with MEV protection) for faster, more reliable inclusion than a plain RPC submit. Sender requires a SOL tip *inside* the signed transaction, so Kuiper adds a 0.000005 SOL tip before the user signs; it appears on tickets and in the simulated balance changes. If Sender rejects a tx, `/send` falls back to the RPC. Set `SENDER_URL=` (empty) to disable.
 - **Agent safety.** The agent can only call prepare/read tools. Tickets carry an unsigned transaction; the user's wallet is the only signer. The submit endpoint checks the fee payer is the ticket's wallet. Recurring/Lend transactions come from Jupiter's APIs and are simulated the same way before you see them.
 - **Why `/build`, not `/order`, for the fallback.** `/build` returns raw instructions we can compose with our fee instruction, and Jupiter charges no swap fee on it. `/order` transactions can't be modified.
 - **Fair comparison.** The platform fee is deducted *before* quoting, and both engines quote the same net amount.

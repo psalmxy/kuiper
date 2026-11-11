@@ -13,13 +13,13 @@ import { SwapService } from "../src/service.js";
 
 const conn = new Connection(process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com", "confirmed");
 const cache = new PoolCache(conn, [], () => {});
-const swaps = new SwapService(conn, cache, new Router(() => cache.amms), new JupiterClient(process.env.JUP_API_KEY ?? ""), { feeBps: 0 });
+const swaps = new SwapService(conn, cache, new Router(() => cache.amms), new JupiterClient(process.env.JUP_API_KEY ?? ""), { feeBps: 0, sender: { url: "https://sender.helius-rpc.com/fast?swqos_only=true", tipLamports: 5000 } });
 const jup = new JupiterExtra(process.env.JUP_API_KEY ?? "");
 const prep = new Preparer(conn, swaps, jup, new TicketStore());
 const USER = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const show = (name: string, t: any) =>
-  console.log(`\n== ${name}: ${t.title}\n   sim ok=${t.simulation.ok} ${t.simulation.error ?? ""} CU=${t.simulation.computeUnits}\n   changes=${JSON.stringify(t.simulation.balanceChanges)}\n   risk=${t.tokenChecks.map((c: any) => c.symbol + ":" + c.risk).join(",")} warnings=${t.warnings.length}${t.simulation.logsTail ? "\n   logs=" + t.simulation.logsTail.slice(-3).join(" | ") : ""}`);
+  console.log(`\n== ${name}: ${t.title}\n   sim ok=${t.simulation.ok} ${t.simulation.error ?? ""} CU=${t.simulation.computeUnits}\n   details=${JSON.stringify(t.details.filter((d: any) => d.label === "Landing"))}\n   changes=${JSON.stringify(t.simulation.balanceChanges)}\n   risk=${t.tokenChecks.map((c: any) => c.symbol + ":" + c.risk).join(",")} warnings=${t.warnings.length}${t.simulation.logsTail ? "\n   logs=" + t.simulation.logsTail.slice(-3).join(" | ") : ""}`);
 const run = async (name: string, f: () => Promise<any>) => {
   try { const r = await f(); name.startsWith("check") ? console.log(`\n== ${name}: risk=${r.risk}`, r.flags.map((x: any) => `[${x.level}] ${x.text}`)) : show(name, r); }
   catch (e) { console.log(`\n== ${name}: ERROR ${(e as Error).message.slice(0, 400)}`); }

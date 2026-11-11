@@ -1,5 +1,6 @@
 import { NATIVE_MINT, createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
-import { ComputeBudgetProgram, PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction, type Connection } from "@solana/web3.js";
+import { ComputeBudgetProgram, PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction, type AddressLookupTableAccount, type Connection } from "@solana/web3.js";
+import { hasSenderTip, senderTipInstruction } from "@kuiper/core";
 import type { SwapService } from "../service.js";
 import type { JupiterExtra } from "./jupiter-extra.js";
 import { simulateWithBalanceChanges, type WatchMint } from "./simulate.js";
@@ -101,6 +102,16 @@ export class Preparer {
     submit?: Ticket["submit"];
     refresh: () => Promise<Ticket>;
   }): Promise<Ticket> {
+    // Fast landing via Helius Sender needs a tip inside the signed tx. Recurring orders land through
+    // Jupiter's own executor instead, so they're left as-is.
+    const tip = this.swaps.senderTip;
+    let tx = a.tx;
+    if (tip > 0 && (a.submit?.via ?? "rpc") === "rpc") {
+      const r = await this.withTip(tx, new PublicKey(a.user), tip);
+      tx = r.tx;
+      if (r.added) a.details = [...a.details, { label: "Landing", value: `Helius Sender, ${tip / 1e9} SOL tip` }];
+    }
+    a.tx = tx;
     const simulation = await simulateWithBalanceChanges(this.connection, a.tx, new PublicKey(a.user), a.watch);
     const warnings = [...(a.warnings ?? [])];
     for (const c of a.checks) if (c.risk === "high") warnings.unshift(`${c.symbol} is high risk: ${c.flags.filter((f) => f.level === "high").map((f) => f.text).join("; ")}`);
@@ -118,6 +129,20 @@ export class Preparer {
       submit: a.submit ?? { via: "rpc" },
       refresh: a.refresh,
     });
+  }
+
+  /** Append a Sender tip to a (possibly Jupiter-built) tx, resolving its lookup tables to decompile it. */
+  private async withTip(tx: VersionedTransaction, user: PublicKey, lamports: number): Promise<{ tx: VersionedTransaction; added: boolean }> {
+    const alts: AddressLookupTableAccount[] = [];
+    for (const l of tx.message.addressTableLookups) {
+      const r = await this.connection.getAddressLookupTable(l.accountKey);
+      if (!r.value) throw new Error(`lookup table ${l.accountKey.toBase58()} not found`);
+      alts.push(r.value);
+    }
+    const msg = TransactionMessage.decompile(tx.message, { addressLookupTableAccounts: alts });
+    if (hasSenderTip(msg.instructions)) return { tx, added: false };
+    msg.instructions.push(senderTipInstruction(user, lamports));
+    return { tx: new VersionedTransaction(msg.compileToV0Message(alts)), added: true };
   }
 
   async swap(p: { user: string; input: string; output: string; amount: string; slippageBps?: number; kind?: TicketKind; note?: string }): Promise<Ticket> {
@@ -139,6 +164,7 @@ export class Preparer {
     ];
     if (BigInt(built.feeAmount) > 0n) details.push({ label: "Kuiper fee", value: `${fromBaseUnits(built.feeAmount, i.decimals)} ${i.symbol}` });
     if (p.note) details.push({ label: "Note", value: p.note });
+    if (built.landingTipLamports) details.push({ label: "Landing", value: `Helius Sender, ${built.landingTipLamports / 1e9} SOL tip` });
     return this.finalize({
       kind,
       title: kind === "stake" ? `Stake ${p.amount} SOL → ${o.symbol}` : `Swap ${p.amount} ${i.symbol} → ${o.symbol}`,
